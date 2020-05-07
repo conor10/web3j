@@ -47,6 +47,7 @@ import org.web3j.abi.EventEncoder;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.DynamicArray;
 import org.web3j.abi.datatypes.Event;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.StaticArray;
@@ -1374,6 +1375,22 @@ public class SolidityFunctionWrapper extends Generator {
         }
 
         for (int i = 0; i < nonIndexedParameters.size(); i++) {
+            NamedTypeName namedTypeName = nonIndexedParameters.get(i);
+            TypeName typeName = namedTypeName.typeName;
+            // Dynamic arrays of Web3j types cannot be safely cast to Lists of native java types
+            // This leads to a ClassCastException on read, which makes sense.
+            if (useNativeJavaTypes
+                    && typeName instanceof ParameterizedTypeName
+                    && ((ParameterizedTypeName) typeName).rawType.equals(ClassName.get(DynamicArray.class))) {
+                TypeName typeArgument = ((ParameterizedTypeName) namedTypeName.typeName).typeArguments.get(0);
+                builder.addStatement("$L.$L = new ArrayList<>()", objectName, namedTypeName.getName());
+                builder.beginControlFlow(
+                        "for ($T element : (List<$T>) eventValues.getNonIndexedValues().get($L).getValue())",
+                        typeArgument,   typeArgument, i)
+                        .addStatement("$L.$L.add(element.getValue())", objectName, namedTypeName.getName())
+                        .endControlFlow();
+                continue;
+            }
             builder.addStatement(
                     "$L.$L = ($T) eventValues.getNonIndexedValues().get($L)" + nativeConversion,
                     objectName,
